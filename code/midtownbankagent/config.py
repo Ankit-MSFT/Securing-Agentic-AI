@@ -19,7 +19,7 @@ _token_provider = get_bearer_token_provider(
 
 def get_llm(model_name: str = "gpt-5.1"):
     return ChatOpenAI(
-        base_url=os.getenv("AZURE_OPENAI_ENDPOINT", "https://ankishar-4407-resource.services.ai.azure.com/openai/v1"),
+        base_url=os.getenv("AZURE_OPENAI_ENDPOINT", "https://XXXXXXXXXXX.services.ai.azure.com/openai/v1"),
         api_key=_token_provider,
         model=MODELS[model_name],
         temperature=0,
