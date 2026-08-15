@@ -27,11 +27,16 @@ def load_env() -> None:
     _ENV_LOADED = True
 
 
-MODEL_ALIASES = {
-    "gpt-5.1": os.getenv("MODEL_GPT", "gpt-5.1"),
-    "mistral": os.getenv("MODEL_MISTRAL", "Mistral-Large-3"),
-    "deepseek": os.getenv("MODEL_DEEPSEEK", "DeepSeek-V4-Flash"),
+MODEL_ALIAS_ENV = {
+    "gpt-5.1": ("MODEL_GPT", "gpt-5.1"),
+    "mistral": ("MODEL_MISTRAL", "Mistral-Large-3"),
+    "deepseek": ("MODEL_DEEPSEEK", "DeepSeek-V4-Flash"),
 }
+
+
+def _resolve_model(model_name: str) -> str:
+    env_var, default = MODEL_ALIAS_ENV.get(model_name, (None, model_name))
+    return os.getenv(env_var, default) if env_var else model_name
 
 
 def get_llm(model_name: str = "gpt-5.1"):
@@ -40,16 +45,19 @@ def get_llm(model_name: str = "gpt-5.1"):
     from langchain_openai import ChatOpenAI
     from azure.identity import AzureCliCredential, get_bearer_token_provider
 
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    if not endpoint:
+        raise RuntimeError(
+            "AZURE_OPENAI_ENDPOINT is not set. Add it to the repo-root .env."
+        )
+
     token_provider = get_bearer_token_provider(
         AzureCliCredential(), "https://ai.azure.com/.default"
     )
     return ChatOpenAI(
-        base_url=os.getenv(
-            "AZURE_OPENAI_ENDPOINT",
-            "https://ankishar-4407-resource.services.ai.azure.com/openai/v1",
-        ),
+        base_url=endpoint,
         api_key=token_provider,
-        model=MODEL_ALIASES.get(model_name, model_name),
+        model=_resolve_model(model_name),
         temperature=0,
     )
 
