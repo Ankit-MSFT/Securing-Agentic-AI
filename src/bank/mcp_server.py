@@ -14,7 +14,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from database import (
+from bank.database import (
     add_customer_note,
     approve_loan,
     block_account,

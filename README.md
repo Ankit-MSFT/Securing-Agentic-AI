@@ -1,8 +1,8 @@
 # Securing-Agentic-AI
 
-Experimental evaluation of threats and defences in autonomous AI agents.
+Experimental evaluation of threats and defenses in autonomous AI agents.
 
-> **Status:** Work in progress. This repository supports an academic cybersecurity research project and does not yet contain final results.
+> Status: Active research project in progress. The repository follows a layered architecture that separates the bank domain, baseline agent, hardened variants, attacks, and evaluation workflow.
 
 ## Objective
 
@@ -16,153 +16,149 @@ The experiment maps attacks and defences to six OWASP Agentic AI threat categori
 | Memory | Memory poisoning | Memory integrity validation |
 | Execution | Tool misuse | Permission-gated tool authorization |
 | Identity | Privilege compromise | Scoped identity tokens |
-| Human-Related | Human manipulation | Human-in-the-Loop approval |
+| Human-Related | Human manipulation | Human-in-the-loop approval |
 | Multi-Agent | Agent communication poisoning | Signed inter-agent messages |
 
-## Experimental Design
-
-Each scenario is implemented in two states:
-
-1. **Vulnerable:** Deliberately excludes category-specific security controls.
-2. **Hardened:** Applies a targeted defence while preserving the same agent architecture.
-
-Both versions are evaluated using identical attack objectives, models, datasets, and execution parameters.
-
-### Scenarios
-
-- **Cognitive:** Reasoning and memory attacks
-- **Action and Authority:** Tool execution and identity attacks
-- **Interaction:** Human-related and multi-agent attacks
-
-The agents operate in **MidTownBank**, a fictional banking environment containing synthetic customers, accounts, transactions, a mock funds-transfer API, and an isolated MCP toolset.
-
-## Evaluation Matrix
-
-The planned experiment covers:
-
-- 6 OWASP threat categories
-- 3 language models
-- 2 agent states: vulnerable and hardened
-- 30 executions per experimental cell
-- **1,080 total attack executions**
-
-Primary measurement:
+## Repository structure
 
 ```text
-Attack Success Rate = Successful attacks / Total attack attempts
+Securing-Agentic-AI/
+├── README.md
+├── .env                          # shared env (LLM endpoints, MCP overrides)
+├── .venv/                        # single virtualenv used by every layer
+├── docs/
+│   ├── architecture/
+│   │   └── midtownbank-hardening-journey.md
+│   ├── methodology/workings/
+│   ├── references/sources/
+│   └── artifacts/
+├── src/
+│   ├── common/                   # shared config + target abstraction
+│   │   ├── config.py             #   load_env, get_llm, bank_mcp_stdio_config
+│   │   └── target.py             #   AgentTarget protocol, AgentFactory type
+│   ├── bank/                     # domain: models, DB, MCP server, seeder
+│   │   ├── models.py
+│   │   ├── database.py
+│   │   ├── seed.py
+│   │   └── mcp_server.py
+│   ├── agents/
+│   │   ├── baseline/             # intentionally vulnerable agent
+│   │   │   ├── factory.py        #   build_agent(model_name)
+│   │   │   ├── agent.py          #   CLI entry point
+│   │   │   ├── app.py            #   Streamlit UI
+│   │   │   └── system_prompt.txt
+│   │   └── hardened/steps/       # progressive hardening variants (WIP)
+│   ├── attacks/                  # PyRIT target/scorer + scenarios
+│   │   ├── pyrit_target.py       #   MidTownAgentTarget(agent_factory=...)
+│   │   ├── pyrit_scorer.py
+│   │   └── scenario_2a.py
+│   ├── controls/                 # reusable security controls (WIP)
+│   └── evaluation/               # ASR runner + metrics (WIP)
+├── tests/
+├── scripts/
+├── data/
+└── guidelines/
 ```
 
-Secondary measurements include:
+## Design principles
 
-- ASR reduction after hardening
-- Human-in-the-Loop prompts
-- Tool authorization refusals
-- Benign-task completion rate
-- Autonomy and usability trade-offs
-- Cross-model differences
+- **Domain layer** (`bank`): synthetic bank + MCP server, no knowledge of agents or attacks.
+- **Agent layer** (`agents.baseline`, later `agents.hardened.steps.*`): each variant exports a `build_agent()` factory.
+- **Attack layer** (`attacks`): drives any agent through an `AgentFactory` — never imports agent internals.
+- **Shared layer** (`common`): env loading, LLM factory, MCP launch config, target protocol.
+- **Evaluation layer** (`evaluation`): runs scenarios across variants, computes ASR and secondary metrics.
 
-## Models
+The hardening journey in [docs/architecture/midtownbank-hardening-journey.md](docs/architecture/midtownbank-hardening-journey.md) is treated as a sequence of controls, each landing as its own hardened variant under `src/agents/hardened/steps/`.
 
-Models are accessed through Azure AI Foundry:
+## Prerequisites
 
-- GPT-4.1-mini
-- Llama-3.3-70B-Instruct
-- DeepSeek-V4-Flash
+- Python 3.13 (matches the pinned `.venv`)
+- Azure CLI logged in (`az login`) — used for the Foundry token provider
+- `.env` at repo root with model endpoints; see `src/agents/baseline/requirements.txt` for the Python deps
 
-## Technology Stack
+## Setup
 
-| Layer | Technology |
+The repo ships with a working `.venv` at the root. If you need to recreate it:
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\activate
+pip install -r src\agents\baseline\requirements.txt
+```
+
+Then register `src/` as importable (already done in this repo, but needed after a fresh venv):
+
+```powershell
+Set-Content .venv\Lib\site-packages\midtown.pth ((Get-Location).Path + "\src")
+```
+
+That single `.pth` line replaces the need to `pip install -e .` and lets every layer be imported as `bank`, `common`, `agents.baseline`, `attacks`, etc.
+
+## Running the project
+
+All commands run from the repo root with the venv active.
+
+**Seed the bank database** (once, or whenever you want a fresh state):
+
+```powershell
+python -m bank.seed
+```
+
+**Run the baseline agent** (CLI):
+
+```powershell
+python -m agents.baseline.agent
+```
+
+**Run the baseline agent** (Streamlit UI):
+
+```powershell
+streamlit run src\agents\baseline\app.py
+```
+
+**Run an attack scenario:**
+
+```powershell
+python -m attacks.scenario_2a               # normal mode
+python -m attacks.scenario_2a --conv        # show attacker/agent conversation
+python -m attacks.scenario_2a --debug       # full PyRIT/LLM debug logging
+```
+
+## Configuration
+
+`.env` at the repo root is loaded automatically by any entry point via `common.load_env()`.
+
+Relevant variables:
+
+| Variable | Purpose |
 |---|---|
-| Language | Python 3.12 |
-| Agent framework | LangChain and LangGraph |
-| Model hosting | Azure AI Foundry |
-| Red-team harness | Microsoft PyRIT |
-| Tool protocol | Model Context Protocol |
-| Synthetic data | Faker |
-| Data store | SQLite |
-| Testing | pytest |
-| Containerization | Docker |
-| Packaging | `pyproject.toml` |
-| Logging | Python logging and PyRIT logs |
-| Source control | Git and GitHub |
+| `AZURE_OPENAI_ENDPOINT` | Azure AI Foundry endpoint used by `common.get_llm` |
+| `MODEL_GPT` / `MODEL_MISTRAL` / `MODEL_DEEPSEEK` | Deployment names for the three test models |
+| `OPENAI_CHAT_ENDPOINT` / `OPENAI_CHAT_KEY` / `OPENAI_CHAT_MODEL` | Used by PyRIT's adversarial/scorer LLMs |
+| `MIDTOWN_MCP_COMMAND` | Override the bank MCP launcher (e.g. container image entrypoint) |
+| `MIDTOWN_MCP_ARGS` | Override the args passed to the MCP launcher (JSON list) |
 
-## Architecture
+The `MIDTOWN_MCP_*` overrides let you move the bank MCP server to Azure Container Apps or another runtime without changing any Python code.
 
-```text
-PyRIT Orchestrator
-        |
-        v
-Attack Objectives and Converters
-        |
-        v
-Vulnerable or Hardened Agent
-        |
-        +-- LangChain prompts and tools
-        +-- LangGraph state and routing
-        +-- Memory subsystem
-        +-- Identity and authorization
-        +-- MCP tools and mock APIs
-        |
-        v
-Azure AI Foundry Model
-        |
-        v
-Deterministic Checker + PyRIT Scorer
-        |
-        v
-Structured Results and ASR Analysis
-```
+## Current implementation status
 
-## Security Controls
+- [x] Synthetic MidTownBank environment (`bank`)
+- [x] Baseline agent + Streamlit UI (`agents.baseline`)
+- [x] Shared config and target abstraction (`common`)
+- [x] Scenario 2A (Tool Misuse) attack via PyRIT (`attacks.scenario_2a`)
+- [ ] Hardened step variants (`agents.hardened.steps.*`)
+- [ ] Attack scenarios 1A, 1B, 2B, 3A, 3B
+- [ ] Evaluation runner and metrics (`evaluation`)
+- [ ] Regression tests (`tests`)
+- [ ] Containerized runtime (Azure Container Apps)
 
-The hardened agents apply:
+## Next workstreams
 
-- Prompt and response validation
-- Memory provenance and integrity checks
-- Tool allowlists and permission gates
-- Least-privilege identity scopes
-- Human approval for sensitive actions
-- Signed inter-agent messages
-- Structured security-event logging
-- Deterministic validation of sensitive operations
-
-## Reproducibility
-
-The experiment uses:
-
-- Fixed random seeds
-- Synthetic datasets
-- Pinned dependency versions
-- Containerized execution
-- Resettable SQLite state
-- Version-controlled prompts and tools
-- Consistent attack objectives
-- Structured attack logs
-- Deterministic exploit-success checks
-
-## Safety Boundaries
-
-- Testing runs only in isolated local containers.
-- Only researcher-owned Azure AI Foundry deployments are targeted.
-- No production or third-party systems are tested.
-- All customers, accounts, transactions, and messages are synthetic.
-- No real personal, financial, or confidential data is used.
-- Vulnerable agents exist only for controlled security research.
-- Credentials and secrets must never be committed.
-
-## Project Status
-
-- [X] Build the synthetic MidTownBank environment
-- [ ] Implement vulnerable agents
-- [ ] Implement representative exploits
-- [ ] Add category-specific controls
-- [ ] Create deterministic exploit checkers
-- [ ] Integrate PyRIT orchestration
-- [ ] Add unit and benign-task tests
-- [ ] Containerize the experiment
-- [ ] Execute the evaluation matrix
-- [ ] Analyze ASR and autonomy trade-offs
-- [ ] Publish final findings
+1. Move the bank MCP into a container (uses `MIDTOWN_MCP_COMMAND`/`ARGS` — no code change needed).
+2. Add hardened agent variants under `src/agents/hardened/steps/`, each exposing its own `build_agent()`.
+3. Point `attacks.pyrit_target.MidTownAgentTarget(agent_factory=...)` at each hardened variant to measure ASR reduction.
+4. Build the evaluation harness under `src/evaluation/`.
+5. Add unit/integration tests under `tests/`.
 
 ## References
 
@@ -172,6 +168,3 @@ The experiment uses:
 - [NIST AI 600-1](https://doi.org/10.6028/NIST.AI.600-1)
 - [Indirect Prompt Injection Research](https://arxiv.org/abs/2302.12173)
 
-## Disclaimer
-
-This repository contains an academic experiment under active development. Its implementation, methodology, model selection, and results may change before final submission.

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from models import (
+from bank.models import (
     Account,
     AgentMessage,
     ComplianceAlert,

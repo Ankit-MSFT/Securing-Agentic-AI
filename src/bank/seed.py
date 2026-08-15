@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from faker import Faker
 
-from database import DB_PATH, init_db
+from bank.database import DB_PATH, init_db
 
 fake = Faker("en_IN")  # Indian locale for realistic names/addresses
 Faker.seed(42)
