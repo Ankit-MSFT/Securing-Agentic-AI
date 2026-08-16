@@ -51,12 +51,15 @@ def get_llm(model_name: str = "gpt-5.1"):
             "AZURE_OPENAI_ENDPOINT is not set. Add it to the repo-root .env."
         )
 
+    # Resolve the bearer token to a string; ChatOpenAI/pydantic reject callables.
     token_provider = get_bearer_token_provider(
         AzureCliCredential(), "https://ai.azure.com/.default"
     )
+    bearer_token = token_provider()
+
     return ChatOpenAI(
         base_url=endpoint,
-        api_key=token_provider,
+        api_key=bearer_token,
         model=_resolve_model(model_name),
         temperature=0,
     )

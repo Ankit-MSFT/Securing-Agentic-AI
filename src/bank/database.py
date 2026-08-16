@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -108,6 +109,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             customer_id TEXT NOT NULL REFERENCES customers(id),
             amount REAL NOT NULL,
             purpose TEXT NOT NULL,
+            loan_account_id TEXT UNIQUE REFERENCES accounts(id),
             status TEXT NOT NULL DEFAULT 'pending',
             created_by TEXT NOT NULL,
             created_at TEXT NOT NULL,
@@ -142,7 +144,84 @@ def create_schema(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
     """)
+
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(loan_applications)")
+    }
+    if "loan_account_id" not in columns:
+        conn.execute(
+            "ALTER TABLE loan_applications ADD COLUMN loan_account_id TEXT REFERENCES accounts(id)"
+        )
+    conn.execute("UPDATE loan_applications SET status = 'rejected' WHERE status = 'denied'")
+    _backfill_loan_accounts(conn)
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_loan_applications_account
+           ON loan_applications(loan_account_id)
+           WHERE loan_account_id IS NOT NULL"""
+    )
     conn.commit()
+
+
+def _new_loan_account_number(conn: sqlite3.Connection, customer_id: str) -> str:
+    row = conn.execute(
+        "SELECT id FROM accounts WHERE customer_id = ? ORDER BY created_at LIMIT 1",
+        (customer_id,),
+    ).fetchone()
+    branch = row["id"][:3] if row and row["id"][:3].isdigit() else "000"
+    while True:
+        account_number = f"{branch}4001{uuid.uuid4().int % 100000000:08d}"
+        if not conn.execute("SELECT 1 FROM accounts WHERE id = ?", (account_number,)).fetchone():
+            return account_number
+
+
+def _create_loan_account(
+    conn: sqlite3.Connection,
+    application_id: str,
+    customer_id: str,
+    amount: float,
+    created_by: str,
+    created_at: str,
+) -> str:
+    account_number = _new_loan_account_number(conn, customer_id)
+    conn.execute(
+        """INSERT INTO accounts
+           (id, customer_id, account_type, balance, status, blocked_reason,
+            created_by, created_at, modified_by, modified_at)
+           VALUES (?, ?, 'loan', ?, 'active', NULL, ?, ?, NULL, NULL)""",
+        (account_number, customer_id, amount, created_by, created_at),
+    )
+    conn.execute(
+        "UPDATE loan_applications SET loan_account_id = ? WHERE id = ?",
+        (account_number, application_id),
+    )
+    return account_number
+
+
+def _backfill_loan_accounts(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """SELECT id, customer_id, amount, status, decided_by, decided_at,
+                  written_off_at
+           FROM loan_applications
+           WHERE status IN ('approved', 'written_off') AND loan_account_id IS NULL"""
+    ).fetchall()
+    for row in rows:
+        account_number = _create_loan_account(
+            conn,
+            row["id"],
+            row["customer_id"],
+            row["amount"],
+            row["decided_by"] or "loan_operations",
+            row["decided_at"] or datetime.now(timezone.utc).isoformat(),
+        )
+        if row["status"] == "written_off":
+            conn.execute(
+                "UPDATE accounts SET balance = 0, status = 'written_off', modified_at = ? WHERE id = ?",
+                (row["written_off_at"], account_number),
+            )
+            conn.execute(
+                "UPDATE loan_applications SET status = 'approved' WHERE id = ?",
+                (row["id"],),
+            )
 
 
 # --- Customer CRUD ---
@@ -380,9 +459,15 @@ def approve_loan(
     conn: sqlite3.Connection, application_id: str, decided_by: str
 ) -> Optional[LoanApplication]:
     now = datetime.now(timezone.utc).isoformat()
+    loan = get_loan(conn, application_id)
+    if not loan or loan.status != "pending":
+        return loan
     conn.execute(
         "UPDATE loan_applications SET status = 'approved', decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
         (decided_by, now, application_id),
+    )
+    _create_loan_account(
+        conn, application_id, loan.customer_id, loan.amount, decided_by, now
     )
     conn.commit()
     return get_loan(conn, application_id)
@@ -393,7 +478,7 @@ def deny_loan(
 ) -> Optional[LoanApplication]:
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        "UPDATE loan_applications SET status = 'denied', decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
+        "UPDATE loan_applications SET status = 'rejected', decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
         (decided_by, now, application_id),
     )
     conn.commit()
@@ -405,11 +490,20 @@ def write_off_loan(
 ) -> Optional[LoanApplication]:
     """Write off a loan (erase debt). Scenario 2B target — no role check in vulnerable version."""
     now = datetime.now(timezone.utc).isoformat()
+    loan = get_loan(conn, application_id)
+    if not loan or loan.status != "approved" or not loan.loan_account_id:
+        return loan
     conn.execute(
         """UPDATE loan_applications
-           SET status = 'written_off', written_off_by = ?, written_off_at = ?, write_off_reason = ?
+           SET written_off_by = ?, written_off_at = ?, write_off_reason = ?
            WHERE id = ? AND status = 'approved'""",
         (written_off_by, now, reason, application_id),
+    )
+    conn.execute(
+        """UPDATE accounts
+           SET balance = 0, status = 'written_off', modified_by = ?, modified_at = ?
+           WHERE id = ? AND account_type = 'loan'""",
+        (written_off_by, now, loan.loan_account_id),
     )
     conn.commit()
     return get_loan(conn, application_id)

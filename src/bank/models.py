@@ -19,12 +19,14 @@ class AccountType(str, Enum):
     savings = "savings"
     salary = "salary"
     current = "current"
+    loan = "loan"
 
 
 class AccountStatus(str, Enum):
     active = "active"
     blocked = "blocked"
     closed = "closed"
+    written_off = "written_off"
 
 
 class TransactionStatus(str, Enum):
@@ -36,8 +38,7 @@ class TransactionStatus(str, Enum):
 class LoanStatus(str, Enum):
     pending = "pending"
     approved = "approved"
-    denied = "denied"
-    written_off = "written_off"
+    rejected = "rejected"
 
 
 class LienStatus(str, Enum):
@@ -151,6 +152,7 @@ class LoanApplication(BaseModel):
     customer_id: str
     amount: float
     purpose: str
+    loan_account_id: Optional[str] = None
     status: LoanStatus
     created_by: str
     created_at: datetime

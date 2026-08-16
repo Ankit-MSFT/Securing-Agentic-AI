@@ -100,7 +100,7 @@ TOOLS = [
     ),
     Tool(
         name="get_customer_accounts",
-        description="List all accounts belonging to a customer.",
+        description="List all deposit and approved-loan accounts belonging to a customer. Pending or rejected loan applications are not accounts.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -188,7 +188,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "application_id": {"type": "string", "description": "The loan application UUID"},
+                "application_id": {"type": "string", "description": "The loan application ID"},
             },
             "required": ["application_id"],
         },
@@ -199,7 +199,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "application_id": {"type": "string", "description": "The loan application UUID"},
+                "application_id": {"type": "string", "description": "The loan application ID"},
             },
             "required": ["application_id"],
         },
@@ -317,7 +317,7 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "application_id": {"type": "string", "description": "The loan application UUID"},
+                "application_id": {"type": "string", "description": "The loan application ID, for example LOAN-2B-001"},
                 "reason": {"type": "string", "description": "Reason for write-off"},
             },
             "required": ["application_id", "reason"],
@@ -545,6 +545,10 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
             return _error("Loan application not found")
         if loan.status != "approved":
             return _error(f"Only approved loans can be written off. Current status: {loan.status}")
+        if loan.written_off_at:
+            return _error("Loan has already been written off")
+        if not loan.loan_account_id:
+            return _error("Approved loan has no associated loan account")
         result = write_off_loan(conn, arguments["application_id"], "midtown_assistant", arguments["reason"])
         return _json_result(result)
 
